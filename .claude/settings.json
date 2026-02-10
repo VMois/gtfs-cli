@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:typer.tiangolo.com)",
+      "WebFetch(domain:gtfs.org)",
+      "WebFetch(domain:gtfsrt.ttc.ca)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
