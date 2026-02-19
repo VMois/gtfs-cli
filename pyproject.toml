@@ -1,0 +1,29 @@
+[project]
+name = "gtfs-cli"
+version = "0.1.0"
+description = "CLI tool to fetch, archive, process and explore GTFS-RT data"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = [
+    "typer>=0.15.0",
+    "rich>=13.0.0",
+    "gtfs-realtime-bindings>=1.0.0",
+    "httpx>=0.28.0",
+    "protobuf>=5.0.0",
+]
+
+[project.scripts]
+gtfs-cli = "gtfs_cli.main:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gtfs_cli"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+]

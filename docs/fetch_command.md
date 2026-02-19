@@ -56,7 +56,7 @@ gtfs-cli fetch "https://gtfsrt.ttc.ca/alerts/all?format=binary" | jq '.entity[] 
 ## IMPLEMENTED
 - `fetch <source>` — URL or local file
 - JSON output to stdout
-- `--timeout` and `--header` for HTTP sources
+- `--timeout` for HTTP sources
 
 ## POTENTIAL FEATURES
 - `--format binary|table` output options
