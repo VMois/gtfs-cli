@@ -58,9 +58,31 @@ gtfs-cli fetch "https://gtfsrt.ttc.ca/alerts/all?format=binary" | jq '.entity[] 
 - JSON output to stdout
 - `--timeout` for HTTP sources
 
+## Watch Mode
+
+`--watch <seconds>` enables continuous fetching at a fixed interval. Each fetch produces one complete JSON object, output as **NDJSON (Newline-Delimited JSON)** — one JSON document per line, flushed immediately after each write.
+
+```bash
+# Fetch trip updates every 30 seconds, filter with jq
+gtfs-cli fetch --watch 30 "https://gtfsrt.ttc.ca/trips/update?format=binary" | jq --unbuffered '.entity[]'
+```
+
+### Why NDJSON
+
+- Each line is a self-contained JSON document — consumers parse line by line
+- `jq` handles this natively, no special flags needed to parse (use `--unbuffered` to avoid jq's own buffering)
+- Python consumers: `for line in sys.stdin: data = json.loads(line)`
+- Plain concatenated JSON (`{}{}`) is not valid JSON — NDJSON uses `\n` as a delimiter to avoid this
+
+### Implementation Notes
+
+- Flush stdout after each JSON write so data reaches the consumer immediately
+- Graceful SIGINT (Ctrl+C) handling — stop cleanly, exit 0
+- Only applies to URL sources (watching a local file doesn't make sense)
+
 ## POTENTIAL FEATURES
 - `--format binary|table` output options
 - `--output` file writing
 - TTY auto-detection for output format (JSON for terminal, length-delimited protobuf for pipes)
-- `--watch <seconds>` with length-delimited protobuf streaming
+- `--watch <seconds>` with NDJSON streaming (see Watch Mode section)
 - Flush-after-write, graceful SIGINT handling
