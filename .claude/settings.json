@@ -3,7 +3,10 @@
     "allow": [
       "WebFetch(domain:typer.tiangolo.com)",
       "WebFetch(domain:gtfs.org)",
-      "WebFetch(domain:gtfsrt.ttc.ca)"
+      "WebFetch(domain:gtfsrt.ttc.ca)",
+      "WebFetch(domain:docs.astral.sh)",
+      "WebFetch(domain:docs.pola.rs)",
+      "WebFetch(domain:python-httpx.org)"
     ],
     "deny": [],
     "ask": []

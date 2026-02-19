@@ -1,22 +1,24 @@
-This project is a CLI tool to fetch, archive, process and explore GTFS data, in particulat GTFS-RT (Real-Time).
+This project is a CLI tool to fetch, archive, process and explore GTFS data, in particular GTFS-RT (Real-Time).
 
-## Implementation stack
-
-Must use the following libraries:
+## Tech stack
 
 - Typer for CLI framework, Rich for nice display
 - gtfs-realtime-bindings for protobuf parsing
-- requests with connection pooling
-- polars for transformations
+- httpx Python library for HTTP connection
+- polars Python library for transformations
 - pyarrow for parquet output
-- uv for package and env management
+- uv for Python package and env management
 
 ## Online resources allowed to fetch
 
-You are allowed to fetch from the following domains:
+You are allowed to fetch from the following domains (full links provided as a helper):
 
 https://gtfs.org/documentation/realtime/reference - GTFS RT specification
+https://gtfs.org/documentation/realtime/language-bindings/python/ - GTFS Python bindings docs
 https://typer.tiangolo.com/tutorial/ - Typer CLI docs/tutorial
+https://docs.astral.sh/uv/ - uv Python package manager
+https://docs.pola.rs/api/python - for polars docs
+https://www.python-httpx.org/ - HTTPX docs
 
 ## GTSF-RT TTC Toronto feed we are using for testing
 
