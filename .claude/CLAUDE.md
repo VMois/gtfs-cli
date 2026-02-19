@@ -8,6 +8,7 @@ This project is a CLI tool to fetch, archive, process and explore GTFS data, in 
 - polars Python library for transformations
 - pyarrow for parquet output
 - uv for Python package and env management
+- pytest for unit tests
 
 ## Online resources allowed to fetch
 
@@ -54,6 +55,7 @@ curl https://gtfsrt.ttc.ca/trips/update?format=binary -o test_trip_updates.pb
 
 - Include usage examples in --help
 - CLI interfaces are an API - version appropriately with semantic versioning
+- Write unit tests whenever you can; make sure not to use network when they are run
 
 ## Project structure
 
@@ -67,7 +69,7 @@ gtfs-cli/
 │       ├── main.py         # Typer app + version
 │       ├── commands/
 │       │   ├── __init__.py
-└── tests/
+├── tests/
 │   └── fixtures/
 │   └── test_abc123.py
-
+├── docs/  # contains description for different features for implementation
