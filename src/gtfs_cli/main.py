@@ -1,6 +1,7 @@
 import typer
 
 from gtfs_cli.commands.fetch import fetch
+from gtfs_cli.commands.view import view
 
 app = typer.Typer(
     name="gtfs-cli",
@@ -15,3 +16,4 @@ def callback() -> None:
 
 
 app.command()(fetch)
+app.command()(view)
