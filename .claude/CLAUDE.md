@@ -21,6 +21,22 @@ https://docs.astral.sh/uv/ - uv Python package manager
 https://docs.pola.rs/api/python - for polars docs
 https://www.python-httpx.org/ - HTTPX docs
 
+## TTC Toronto static GTFS feed
+
+**Download URL:**
+```
+https://ckan0.cf.opendata.inter.prod-toronto.ca/dataset/7795b45e-e65a-4465-81fc-c36b9dfff169/resource/cfb6b2b8-6191-41e3-bda1-b175c51148cb/download/TTC%20Routes%20and%20Schedules%20Data.zip
+```
+
+**Sample workflow:**
+```bash
+curl -L "<url above>" -o /tmp/ttc_static.zip
+unzip /tmp/ttc_static.zip -d /tmp/ttc_static/
+gtfs-cli static info /tmp/ttc_static/
+```
+
+Fixtures in `tests/fixtures/ttc_static/` are sampled from this feed (trips, shapes, stop_times truncated to 300 rows).
+
 ## GTSF-RT TTC Toronto feed we are using for testing
 
 Base URL: `https://gtfsrt.ttc.ca`
