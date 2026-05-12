@@ -1,6 +1,7 @@
 import json
 import signal
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Optional
@@ -115,28 +116,32 @@ def fetch(
     print(json_output)
 
 
-def _watch_loop(url: str, timeout: float, interval: float) -> None:
+def _watch_loop(
+    url: str,
+    timeout: float,
+    interval: float,
+    _stop_event: threading.Event | None = None,
+) -> None:
     """Continuously fetch a GTFS-RT feed and output NDJSON lines."""
     import httpx
 
-    shutdown = False
+    stop_event = _stop_event if _stop_event is not None else threading.Event()
 
     def _sigterm_handler(signum, frame):
-        nonlocal shutdown
-        shutdown = True
+        stop_event.set()
 
     old_handler = signal.signal(signal.SIGTERM, _sigterm_handler)
     consecutive_failures = 0
     try:
         with httpx.Client(timeout=timeout, follow_redirects=True) as client:
-            while not shutdown:
+            while not stop_event.is_set():
                 next_wake = time.monotonic() + interval
                 try:
                     data = _fetch_from_url(url, timeout, client=client)
                 except (httpx.HTTPStatusError, httpx.RequestError) as e:
                     print(f"HTTP error: {e}", file=sys.stderr)
                     consecutive_failures += 1
-                    time.sleep(_backoff_delay(consecutive_failures))
+                    stop_event.wait(_backoff_delay(consecutive_failures))
                     continue
 
                 consecutive_failures = 0
@@ -147,7 +152,7 @@ def _watch_loop(url: str, timeout: float, interval: float) -> None:
                 except Exception as e:
                     print(f"Parse error: {e}", file=sys.stderr)
 
-                time.sleep(_remaining_sleep(next_wake))
+                stop_event.wait(_remaining_sleep(next_wake))
     except KeyboardInterrupt:
         pass
     finally:

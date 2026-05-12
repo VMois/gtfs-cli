@@ -1,4 +1,5 @@
 import json
+import threading
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -8,6 +9,19 @@ from typer.testing import CliRunner
 import gtfs_cli.commands.fetch as fetch_mod
 from gtfs_cli.commands.fetch import _feed_to_ndjson_line, _parse_feed
 from gtfs_cli.main import app
+
+
+class _ImmediateEvent(threading.Event):
+    """Test double: records wait() timeouts and returns instantly without blocking."""
+
+    def __init__(self):
+        super().__init__()
+        self.wait_times: list[float] = []
+
+    def wait(self, timeout=None):
+        if timeout is not None:
+            self.wait_times.append(timeout)
+        return self.is_set()
 
 runner = CliRunner()
 
@@ -61,6 +75,7 @@ def test_watch_sigterm_exits_cleanly(monkeypatch):
     import os
     import signal
 
+    stop_event = _ImmediateEvent()
     call_count = 0
 
     def mock_fetch(url, timeout, client=None):
@@ -71,10 +86,9 @@ def test_watch_sigterm_exits_cleanly(monkeypatch):
         raise httpx.RequestError("network error")
 
     monkeypatch.setattr(fetch_mod, "_fetch_from_url", mock_fetch)
-    monkeypatch.setattr("time.sleep", lambda x: None)
     monkeypatch.setattr("time.monotonic", lambda: 0.0)
 
-    fetch_mod._watch_loop("https://example.com", 30.0, 5.0)  # must return, not raise
+    fetch_mod._watch_loop("https://example.com", 30.0, 5.0, _stop_event=stop_event)
 
     assert call_count >= 2
 
@@ -84,14 +98,15 @@ def test_watch_restores_sigterm_handler_after_exit(monkeypatch):
     import signal
 
     original_handler = signal.getsignal(signal.SIGTERM)
+    stop_event = _ImmediateEvent()
 
     def mock_fetch(url, timeout, client=None):
         raise KeyboardInterrupt
 
     monkeypatch.setattr(fetch_mod, "_fetch_from_url", mock_fetch)
-    monkeypatch.setattr("time.sleep", lambda x: None)
+    monkeypatch.setattr("time.monotonic", lambda: 0.0)
 
-    fetch_mod._watch_loop("https://example.com", 30.0, 5.0)
+    fetch_mod._watch_loop("https://example.com", 30.0, 5.0, _stop_event=stop_event)
 
     assert signal.getsignal(signal.SIGTERM) is original_handler
 
@@ -112,8 +127,8 @@ def test_remaining_sleep_never_negative(monkeypatch):
 def test_watch_drift_corrected_sleep(monkeypatch):
     """Sleep duration is reduced by the time spent fetching."""
     call_count = 0
-    sleep_times = []
-    # interval=10: monotonic→0.0 sets next_wake=10; after fetch monotonic→7.0 → sleep 3.0
+    stop_event = _ImmediateEvent()
+    # interval=10: monotonic→0.0 sets next_wake=10; after fetch monotonic→7.0 → wait(3.0)
     # second iteration: monotonic→10.0 then fetch raises KeyboardInterrupt
     monotonic_seq = iter([0.0, 7.0, 10.0])
 
@@ -129,11 +144,10 @@ def test_watch_drift_corrected_sleep(monkeypatch):
     monkeypatch.setattr(fetch_mod, "_fetch_from_url", mock_fetch)
     monkeypatch.setattr(fetch_mod, "_parse_feed", lambda _: MagicMock())
     monkeypatch.setattr(fetch_mod, "_feed_to_ndjson_line", lambda _: "{}")
-    monkeypatch.setattr("time.sleep", lambda x: sleep_times.append(x))
 
-    fetch_mod._watch_loop("https://example.com", 30.0, 10.0)
+    fetch_mod._watch_loop("https://example.com", 30.0, 10.0, _stop_event=stop_event)
 
-    assert sleep_times == [3.0]  # 10.0 - 7.0 = 3.0
+    assert stop_event.wait_times == [3.0]  # 10.0 - 7.0 = 3.0
 
 
 def test_backoff_delay_doubles_each_failure():
@@ -158,7 +172,7 @@ def test_backoff_delay_custom_cap():
 def test_watch_uses_backoff_sleep_on_consecutive_http_failures(monkeypatch):
     """Each successive HTTP failure sleeps for a longer backoff (1s, 2s, 4s…)."""
     call_count = 0
-    sleep_times = []
+    stop_event = _ImmediateEvent()
 
     def mock_fetch(url, timeout, client=None):
         nonlocal call_count
@@ -168,18 +182,17 @@ def test_watch_uses_backoff_sleep_on_consecutive_http_failures(monkeypatch):
         raise httpx.RequestError("timeout")
 
     monkeypatch.setattr(fetch_mod, "_fetch_from_url", mock_fetch)
-    monkeypatch.setattr("time.sleep", lambda x: sleep_times.append(x))
     monkeypatch.setattr("time.monotonic", lambda: 0.0)
 
-    fetch_mod._watch_loop("https://example.com", 30.0, 5.0)
+    fetch_mod._watch_loop("https://example.com", 30.0, 5.0, _stop_event=stop_event)
 
-    assert sleep_times == [1.0, 2.0, 4.0]
+    assert stop_event.wait_times == [1.0, 2.0, 4.0]
 
 
 def test_watch_resets_backoff_after_success(monkeypatch):
     """A successful fetch resets the failure counter so backoff restarts from 1s."""
     call_count = 0
-    sleep_times = []
+    stop_event = _ImmediateEvent()
 
     def mock_fetch(url, timeout, client=None):
         nonlocal call_count
@@ -194,19 +207,18 @@ def test_watch_resets_backoff_after_success(monkeypatch):
     monkeypatch.setattr(fetch_mod, "_fetch_from_url", mock_fetch)
     monkeypatch.setattr(fetch_mod, "_parse_feed", lambda _: MagicMock())
     monkeypatch.setattr(fetch_mod, "_feed_to_ndjson_line", lambda _: "{}")
-    monkeypatch.setattr("time.sleep", lambda x: sleep_times.append(x))
     monkeypatch.setattr("time.monotonic", lambda: 0.0)
 
-    fetch_mod._watch_loop("https://example.com", 30.0, 5.0)
+    fetch_mod._watch_loop("https://example.com", 30.0, 5.0, _stop_event=stop_event)
 
     # failure 1→backoff(1)=1, failure 2→backoff(2)=2, success→interval=5, failure 1→backoff(1)=1
-    assert sleep_times == [1.0, 2.0, 5.0, 1.0]
+    assert stop_event.wait_times == [1.0, 2.0, 5.0, 1.0]
 
 
 def test_watch_parse_error_does_not_trigger_backoff(monkeypatch):
     """A parse error after a successful HTTP fetch does not increment the backoff counter."""
     call_count = 0
-    sleep_times = []
+    stop_event = _ImmediateEvent()
 
     def mock_fetch(url, timeout, client=None):
         nonlocal call_count
@@ -217,13 +229,12 @@ def test_watch_parse_error_does_not_trigger_backoff(monkeypatch):
 
     monkeypatch.setattr(fetch_mod, "_fetch_from_url", mock_fetch)
     monkeypatch.setattr(fetch_mod, "_parse_feed", lambda _: (_ for _ in ()).throw(RuntimeError("bad proto")))
-    monkeypatch.setattr("time.sleep", lambda x: sleep_times.append(x))
     monkeypatch.setattr("time.monotonic", lambda: 0.0)
 
-    fetch_mod._watch_loop("https://example.com", 30.0, 5.0)
+    fetch_mod._watch_loop("https://example.com", 30.0, 5.0, _stop_event=stop_event)
 
     # Both iterations should sleep the full interval, not a backoff
-    assert sleep_times == [5.0, 5.0]
+    assert stop_event.wait_times == [5.0, 5.0]
 
 
 def test_feed_to_ndjson_line_is_single_line():
@@ -258,6 +269,7 @@ def test_watch_reuses_http_client(monkeypatch):
     """_watch_loop creates one httpx.Client and passes the same instance to every fetch."""
     call_count = 0
     clients_seen = []
+    stop_event = _ImmediateEvent()
 
     def mock_fetch(url, timeout, client=None):
         nonlocal call_count
@@ -268,10 +280,9 @@ def test_watch_reuses_http_client(monkeypatch):
         raise httpx.RequestError("simulated error")
 
     monkeypatch.setattr(fetch_mod, "_fetch_from_url", mock_fetch)
-    monkeypatch.setattr("time.sleep", lambda x: None)
     monkeypatch.setattr("time.monotonic", lambda: 0.0)
 
-    fetch_mod._watch_loop("https://example.com", 30.0, 5.0)
+    fetch_mod._watch_loop("https://example.com", 30.0, 5.0, _stop_event=stop_event)
 
     assert call_count == 3
     assert clients_seen[0] is not None
