@@ -23,7 +23,6 @@ ROUTE_TYPE_NAMES = {
     "12": "Monorail",
 }
 
-REQUIRED_FILES = ["agency.txt", "stops.txt", "routes.txt", "trips.txt", "stop_times.txt"]
 OPTIONAL_FILES = ["shapes.txt", "feed_info.txt", "frequencies.txt", "transfers.txt"]
 WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
 
@@ -58,13 +57,6 @@ def static_info(
     if not folder.is_dir():
         print(f"Error: '{folder}' is not a directory.", file=sys.stderr)
         raise typer.Exit(code=1)
-
-    missing = [f for f in REQUIRED_FILES if not (folder / f).exists()]
-    has_calendar = (folder / "calendar.txt").exists() or (folder / "calendar_dates.txt").exists()
-    if not has_calendar:
-        missing.append("calendar.txt or calendar_dates.txt")
-    if missing:
-        console.print(f"[yellow]Warning: missing files: {', '.join(missing)}[/yellow]\n")
 
     # Agency
     agency_name = None
