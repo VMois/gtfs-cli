@@ -94,6 +94,46 @@ def test_watch_restores_sigterm_handler_after_exit(monkeypatch):
     assert signal.getsignal(signal.SIGTERM) is original_handler
 
 
+def test_remaining_sleep_returns_time_left(monkeypatch):
+    from gtfs_cli.commands.fetch import _remaining_sleep
+    monkeypatch.setattr("time.monotonic", lambda: 100.0)
+    assert _remaining_sleep(105.0) == 5.0
+    assert _remaining_sleep(100.0) == 0.0
+
+
+def test_remaining_sleep_never_negative(monkeypatch):
+    from gtfs_cli.commands.fetch import _remaining_sleep
+    monkeypatch.setattr("time.monotonic", lambda: 100.0)
+    assert _remaining_sleep(95.0) == 0.0
+
+
+def test_watch_drift_corrected_sleep(monkeypatch):
+    """Sleep duration is reduced by the time spent fetching."""
+    call_count = 0
+    sleep_times = []
+    # interval=10: monotonic→0.0 sets next_wake=10; after fetch monotonic→7.0 → sleep 3.0
+    # second iteration: monotonic→10.0 then fetch raises KeyboardInterrupt
+    monotonic_seq = iter([0.0, 7.0, 10.0])
+
+    monkeypatch.setattr("time.monotonic", lambda: next(monotonic_seq))
+
+    def mock_fetch(url, timeout, client=None):
+        nonlocal call_count
+        call_count += 1
+        if call_count >= 2:
+            raise KeyboardInterrupt
+        return b""
+
+    monkeypatch.setattr(fetch_mod, "_fetch_from_url", mock_fetch)
+    monkeypatch.setattr(fetch_mod, "_parse_feed", lambda _: MagicMock())
+    monkeypatch.setattr(fetch_mod, "_feed_to_ndjson_line", lambda _: "{}")
+    monkeypatch.setattr("time.sleep", lambda x: sleep_times.append(x))
+
+    fetch_mod._watch_loop("https://example.com", 30.0, 10.0)
+
+    assert sleep_times == [3.0]  # 10.0 - 7.0 = 3.0
+
+
 def test_backoff_delay_doubles_each_failure():
     from gtfs_cli.commands.fetch import _backoff_delay
     assert _backoff_delay(1) == 1.0
@@ -152,6 +192,7 @@ def test_watch_resets_backoff_after_success(monkeypatch):
     monkeypatch.setattr(fetch_mod, "_parse_feed", lambda _: MagicMock())
     monkeypatch.setattr(fetch_mod, "_feed_to_ndjson_line", lambda _: "{}")
     monkeypatch.setattr("time.sleep", lambda x: sleep_times.append(x))
+    monkeypatch.setattr("time.monotonic", lambda: 0.0)  # next_wake always = interval
 
     fetch_mod._watch_loop("https://example.com", 30.0, 5.0)
 
