@@ -1,6 +1,6 @@
 # gtfs-cli
 
-CLI tool to fetch, process, and explore [GTFS](https://gtfs.org/) transit data — both realtime (GTFS-RT) and static schedules. Built on Unix philosophy: each command does one thing and writes to stdout, so they compose naturally with `jq`, `csvkit`, and each other.
+CLI tool to fetch, process, and explore [GTFS](https://gtfs.org/) transit data — both realtime (GTFS-RT) and static schedules. Follows Unix philosophy: each command does one thing and writes to stdout, composing naturally with tools like `curl`, `unzip`, and `jq`.
 
 ## Installation
 
