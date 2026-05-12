@@ -55,6 +55,45 @@ def test_watch_with_local_file_exits_with_error():
     assert "URL source" in result.output
 
 
+def test_watch_sigterm_exits_cleanly(monkeypatch):
+    """SIGTERM causes the watch loop to exit without raising an exception."""
+    import os
+    import signal
+
+    call_count = 0
+
+    def mock_fetch(url, timeout, client=None):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 2:
+            os.kill(os.getpid(), signal.SIGTERM)
+        raise RuntimeError("network error")
+
+    monkeypatch.setattr(fetch_mod, "_fetch_from_url", mock_fetch)
+    monkeypatch.setattr("time.sleep", lambda x: None)
+
+    fetch_mod._watch_loop("https://example.com", 30.0, 5.0)  # must return, not raise
+
+    assert call_count >= 2
+
+
+def test_watch_restores_sigterm_handler_after_exit(monkeypatch):
+    """The original SIGTERM handler is restored after the loop exits."""
+    import signal
+
+    original_handler = signal.getsignal(signal.SIGTERM)
+
+    def mock_fetch(url, timeout, client=None):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(fetch_mod, "_fetch_from_url", mock_fetch)
+    monkeypatch.setattr("time.sleep", lambda x: None)
+
+    fetch_mod._watch_loop("https://example.com", 30.0, 5.0)
+
+    assert signal.getsignal(signal.SIGTERM) is original_handler
+
+
 def test_backoff_delay_doubles_each_failure():
     from gtfs_cli.commands.fetch import _backoff_delay
     assert _backoff_delay(1) == 1.0
