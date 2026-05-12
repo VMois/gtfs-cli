@@ -1,4 +1,5 @@
 import json
+import signal
 import sys
 import time
 from pathlib import Path
@@ -113,10 +114,17 @@ def _watch_loop(url: str, timeout: float, interval: float) -> None:
     """Continuously fetch a GTFS-RT feed and output NDJSON lines."""
     import httpx
 
+    shutdown = False
+
+    def _sigterm_handler(signum, frame):
+        nonlocal shutdown
+        shutdown = True
+
+    old_handler = signal.signal(signal.SIGTERM, _sigterm_handler)
     consecutive_failures = 0
     try:
         with httpx.Client(timeout=timeout, follow_redirects=True) as client:
-            while True:
+            while not shutdown:
                 try:
                     data = _fetch_from_url(url, timeout, client=client)
                     feed = _parse_feed(data)
@@ -130,3 +138,5 @@ def _watch_loop(url: str, timeout: float, interval: float) -> None:
                     time.sleep(_backoff_delay(consecutive_failures))
     except KeyboardInterrupt:
         pass
+    finally:
+        signal.signal(signal.SIGTERM, old_handler)
