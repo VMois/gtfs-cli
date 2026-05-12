@@ -11,6 +11,12 @@ import typer
 from google.protobuf.json_format import MessageToDict, MessageToJson
 from google.transit import gtfs_realtime_pb2
 
+logging.basicConfig(
+    level=logging.ERROR,
+    format="%(asctime)s %(levelname)s %(message)s",
+    datefmt="%Y-%m-%dT%H:%M:%S",
+    stream=sys.stderr,
+)
 logger = logging.getLogger(__name__)
 
 
@@ -94,12 +100,6 @@ def fetch(
                 file=sys.stderr,
             )
             raise typer.Exit(code=1)
-        logging.basicConfig(
-            level=logging.ERROR,
-            format="%(asctime)s %(levelname)s %(message)s",
-            datefmt="%Y-%m-%dT%H:%M:%S",
-            stream=sys.stderr,
-        )
         _watch_loop(source, timeout, watch)
         return
 
