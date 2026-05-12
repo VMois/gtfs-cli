@@ -59,28 +59,7 @@ def _parse_date(yyyymmdd: str) -> date:
     return date(int(yyyymmdd[:4]), int(yyyymmdd[4:6]), int(yyyymmdd[6:]))
 
 
-def _gtfs_time(t: str | None) -> str:
-    """Format a GTFS time string. Times past midnight use a +1 suffix (e.g. 26:30 → 02:30+1)."""
-    if not t:
-        return ""
-    parts = t.split(":")
-    h, m = int(parts[0]), int(parts[1])
-    if h >= 24:
-        return f"{h - 24:02d}:{m:02d}+1"
-    return f"{h:02d}:{m:02d}"
 
-
-def _time_range(times: pl.Series) -> tuple[str, str]:
-    """Return (first, last) GTFS time strings, sorted by numeric value not lexicographically.
-
-    Needed because GTFS hours are not always zero-padded ('5:30:00' vs '10:00:00'),
-    so string min/max gives wrong results.
-    """
-    mins = times.map_elements(
-        lambda t: int(t.split(":")[0]) * 60 + int(t.split(":")[1]),
-        return_dtype=pl.Int32,
-    )
-    return times[mins.arg_min()], times[mins.arg_max()]
 
 
 def _human_size(n: int) -> str:
@@ -170,30 +149,6 @@ def static_info(
     if shapes_df is not None and "shape_id" in shapes_df.columns:
         shapes_str = f"{shapes_df.height:,} points across {shapes_df['shape_id'].n_unique():,} shapes"
 
-    # ── Service windows ───────────────────────────────────────────────────────
-    service_windows: list[tuple[str, str]] = []
-    if calendar_df is not None and trips_df is not None and stop_times_df is not None:
-        trip_days = trips_df.select(["trip_id", "service_id"]).join(
-            calendar_df.select(["service_id", "monday", "saturday", "sunday"]),
-            on="service_id",
-            how="left",
-        )
-        times = stop_times_df.select(["trip_id", "departure_time"]).join(
-            trip_days, on="trip_id", how="left"
-        )
-        for label, col in [("Weekday", "monday"), ("Saturday", "saturday"), ("Sunday", "sunday")]:
-            if col not in times.columns:
-                continue
-            day = times.filter(
-                (pl.col(col) == "1")
-                & pl.col("departure_time").is_not_null()
-                & (pl.col("departure_time") != "")
-            )["departure_time"]
-            if day.is_empty():
-                continue
-            first, last = _time_range(day)
-            service_windows.append((label, f"{_gtfs_time(first)} – {_gtfs_time(last)}"))
-
     # ── Service days ──────────────────────────────────────────────────────────
     active_days: list[str] = []
     if calendar_df is not None:
@@ -249,15 +204,6 @@ def static_info(
         t.add_column(justify="right")
         for name, count in route_types:
             t.add_row(f"  {name}", f"{count:,}")
-        console.print(t)
-
-    if service_windows:
-        _section("Service windows")
-        t = Table(box=None, show_header=False, padding=(0, 1), pad_edge=False)
-        t.add_column(style="dim", no_wrap=True)
-        t.add_column()
-        for label, window in service_windows:
-            t.add_row(f"  {label}", window)
         console.print(t)
 
     if active_days:
