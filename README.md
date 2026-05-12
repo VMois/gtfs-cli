@@ -8,12 +8,6 @@ CLI tool to fetch, archive, process and explore [GTFS-RT](https://gtfs.org/docum
 uv tool install gtfs-cli
 ```
 
-Or with pip:
-
-```bash
-pip install gtfs-cli
-```
-
 After installation, the `gtfs-cli` command is available globally.
 
 ## Commands
