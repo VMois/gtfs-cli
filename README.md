@@ -1,6 +1,6 @@
 # gtfs-cli
 
-CLI tool to fetch, archive, process and explore [GTFS-RT](https://gtfs.org/documentation/realtime/reference/) (General Transit Feed Specification — Realtime) data. GTFS-RT feeds provide live transit information: trip updates, vehicle positions, and service alerts in protobuf format.
+CLI tool to fetch, process, and explore [GTFS](https://gtfs.org/) transit data — both realtime (GTFS-RT) and static schedules. Built on Unix philosophy: each command does one thing and writes to stdout, so they compose naturally with `jq`, `csvkit`, and each other.
 
 ## Installation
 
@@ -11,6 +11,26 @@ uv tool install gtfs-cli
 After installation, the `gtfs-cli` command is available globally.
 
 ## Commands
+
+### `static info`
+
+Inspect a static GTFS feed (a folder of `.txt` files). Shows agency, valid dates, feed age, stop/route/trip counts, route types, service days, and file inventory.
+
+```bash
+# Download and unzip a feed, then inspect it
+curl -L "https://ckan0.cf.opendata.inter.prod-toronto.ca/dataset/7795b45e-e65a-4465-81fc-c36b9dfff169/resource/cfb6b2b8-6191-41e3-bda1-b175c51148cb/download/TTC%20Routes%20and%20Schedules%20Data.zip" -o ttc.zip
+unzip ttc.zip -d ttc/
+gtfs-cli static info ttc/
+
+# Inspect the current directory
+gtfs-cli static info
+```
+
+For all available options, run:
+
+```bash
+gtfs-cli static info --help
+```
 
 ### `fetch`
 
