@@ -64,12 +64,12 @@ def test_static_info_missing_folder_exits_with_error():
     assert result.exit_code == 1
 
 
-def test_static_info_missing_required_files_warns(tmp_path):
-    """Missing required files produce a warning but exit 0."""
+def test_static_info_partial_feed_exits_ok(tmp_path):
+    """A folder with only some files still exits 0 and shows what it can."""
     (tmp_path / "agency.txt").write_text("agency_name,agency_url,agency_timezone\nTest Agency,http://test.com,UTC\n")
     result = runner.invoke(app, ["static", "info", str(tmp_path)])
     assert result.exit_code == 0
-    assert "Warning" in result.output
+    assert "Test Agency" in result.output
 
 
 def test_static_info_uses_feed_info_dates(tmp_path):
