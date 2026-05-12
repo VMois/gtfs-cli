@@ -48,7 +48,8 @@ def test_static_info_ttc_shows_service_days():
 
 def test_static_info_ttc_shows_optional_files():
     result = runner.invoke(app, ["static", "info", str(TTC_STATIC)])
-    assert "shapes.txt" in result.output
+    assert "shapes" in result.output
+    assert "Optional" in result.output
 
 
 def test_static_info_default_folder_is_cwd(tmp_path):
