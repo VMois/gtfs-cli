@@ -237,6 +237,54 @@ def test_watch_parse_error_does_not_trigger_backoff(monkeypatch):
     assert stop_event.wait_times == [5.0, 5.0]
 
 
+def test_watch_http_error_is_logged(monkeypatch, caplog):
+    """HTTP errors are emitted via the logger at ERROR level."""
+    import logging
+
+    stop_event = _ImmediateEvent()
+    call_count = 0
+
+    def mock_fetch(url, timeout, client=None):
+        nonlocal call_count
+        call_count += 1
+        if call_count >= 2:
+            raise KeyboardInterrupt
+        raise httpx.RequestError("connection timeout")
+
+    monkeypatch.setattr(fetch_mod, "_fetch_from_url", mock_fetch)
+    monkeypatch.setattr("time.monotonic", lambda: 0.0)
+
+    with caplog.at_level(logging.ERROR, logger="gtfs_cli.commands.fetch"):
+        fetch_mod._watch_loop("https://example.com", 30.0, 5.0, _stop_event=stop_event)
+
+    assert any("connection timeout" in r.message for r in caplog.records)
+    assert all(r.levelno == logging.ERROR for r in caplog.records)
+
+
+def test_watch_parse_error_is_logged(monkeypatch, caplog):
+    """Parse errors are emitted via the logger at ERROR level."""
+    import logging
+
+    stop_event = _ImmediateEvent()
+    call_count = 0
+
+    def mock_fetch(url, timeout, client=None):
+        nonlocal call_count
+        call_count += 1
+        if call_count >= 2:
+            raise KeyboardInterrupt
+        return b""
+
+    monkeypatch.setattr(fetch_mod, "_fetch_from_url", mock_fetch)
+    monkeypatch.setattr(fetch_mod, "_parse_feed", lambda _: (_ for _ in ()).throw(RuntimeError("bad proto")))
+    monkeypatch.setattr("time.monotonic", lambda: 0.0)
+
+    with caplog.at_level(logging.ERROR, logger="gtfs_cli.commands.fetch"):
+        fetch_mod._watch_loop("https://example.com", 30.0, 5.0, _stop_event=stop_event)
+
+    assert any("bad proto" in r.message for r in caplog.records)
+
+
 def test_watch_broken_pipe_exits_cleanly(monkeypatch):
     """BrokenPipeError on stdout causes a clean exit rather than a crash."""
     call_count = 0

@@ -1,4 +1,5 @@
 import json
+import logging
 import signal
 import sys
 import threading
@@ -9,6 +10,8 @@ from typing import Optional
 import typer
 from google.protobuf.json_format import MessageToDict, MessageToJson
 from google.transit import gtfs_realtime_pb2
+
+logger = logging.getLogger(__name__)
 
 
 def _is_url(source: str) -> bool:
@@ -91,6 +94,12 @@ def fetch(
                 file=sys.stderr,
             )
             raise typer.Exit(code=1)
+        logging.basicConfig(
+            level=logging.ERROR,
+            format="%(asctime)s %(levelname)s %(message)s",
+            datefmt="%Y-%m-%dT%H:%M:%S",
+            stream=sys.stderr,
+        )
         _watch_loop(source, timeout, watch)
         return
 
@@ -139,7 +148,7 @@ def _watch_loop(
                 try:
                     data = _fetch_from_url(url, timeout, client=client)
                 except (httpx.HTTPStatusError, httpx.RequestError) as e:
-                    print(f"HTTP error: {e}", file=sys.stderr)
+                    logger.error("HTTP error: %s", e)
                     consecutive_failures += 1
                     stop_event.wait(_backoff_delay(consecutive_failures))
                     continue
@@ -153,7 +162,7 @@ def _watch_loop(
                     stop_event.set()
                     break
                 except Exception as e:
-                    print(f"Parse error: {e}", file=sys.stderr)
+                    logger.error("Parse error: %s", e)
 
                 stop_event.wait(_remaining_sleep(next_wake))
     except KeyboardInterrupt:
