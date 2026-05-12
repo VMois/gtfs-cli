@@ -149,6 +149,9 @@ def _watch_loop(
                     feed = _parse_feed(data)
                     print(_feed_to_ndjson_line(feed))
                     sys.stdout.flush()
+                except BrokenPipeError:
+                    stop_event.set()
+                    break
                 except Exception as e:
                     print(f"Parse error: {e}", file=sys.stderr)
 
