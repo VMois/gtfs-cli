@@ -237,6 +237,33 @@ def test_watch_parse_error_does_not_trigger_backoff(monkeypatch):
     assert stop_event.wait_times == [5.0, 5.0]
 
 
+def test_watch_broken_pipe_exits_cleanly(monkeypatch):
+    """BrokenPipeError on stdout causes a clean exit rather than a crash."""
+    call_count = 0
+    stop_event = _ImmediateEvent()
+
+    def mock_fetch(url, timeout, client=None):
+        nonlocal call_count
+        call_count += 1
+        return b""
+
+    class _BrokenStdout:
+        def write(self, *args, **kwargs):
+            raise BrokenPipeError("broken pipe")
+        def flush(self, *args, **kwargs):
+            raise BrokenPipeError("broken pipe")
+
+    monkeypatch.setattr(fetch_mod, "_fetch_from_url", mock_fetch)
+    monkeypatch.setattr(fetch_mod, "_parse_feed", lambda _: MagicMock())
+    monkeypatch.setattr(fetch_mod, "_feed_to_ndjson_line", lambda _: "{}")
+    monkeypatch.setattr("sys.stdout", _BrokenStdout())
+    monkeypatch.setattr("time.monotonic", lambda: 0.0)
+
+    fetch_mod._watch_loop("https://example.com", 30.0, 5.0, _stop_event=stop_event)
+
+    assert call_count == 1  # exits immediately after the broken pipe, not on the next iteration
+
+
 def test_feed_to_ndjson_line_is_single_line():
     """_feed_to_ndjson_line should produce compact single-line JSON."""
     data = TRIP_UPDATE_PB.read_bytes()
