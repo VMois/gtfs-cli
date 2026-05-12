@@ -133,15 +133,21 @@ def _watch_loop(url: str, timeout: float, interval: float) -> None:
                 next_wake = time.monotonic() + interval
                 try:
                     data = _fetch_from_url(url, timeout, client=client)
+                except (httpx.HTTPStatusError, httpx.RequestError) as e:
+                    print(f"HTTP error: {e}", file=sys.stderr)
+                    consecutive_failures += 1
+                    time.sleep(_backoff_delay(consecutive_failures))
+                    continue
+
+                consecutive_failures = 0
+                try:
                     feed = _parse_feed(data)
                     print(_feed_to_ndjson_line(feed))
                     sys.stdout.flush()
-                    consecutive_failures = 0
-                    time.sleep(_remaining_sleep(next_wake))
                 except Exception as e:
-                    print(f"Error: {e}", file=sys.stderr)
-                    consecutive_failures += 1
-                    time.sleep(_backoff_delay(consecutive_failures))
+                    print(f"Parse error: {e}", file=sys.stderr)
+
+                time.sleep(_remaining_sleep(next_wake))
     except KeyboardInterrupt:
         pass
     finally:

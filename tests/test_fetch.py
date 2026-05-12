@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import httpx
 from typer.testing import CliRunner
 
 import gtfs_cli.commands.fetch as fetch_mod
@@ -67,10 +68,11 @@ def test_watch_sigterm_exits_cleanly(monkeypatch):
         call_count += 1
         if call_count == 2:
             os.kill(os.getpid(), signal.SIGTERM)
-        raise RuntimeError("network error")
+        raise httpx.RequestError("network error")
 
     monkeypatch.setattr(fetch_mod, "_fetch_from_url", mock_fetch)
     monkeypatch.setattr("time.sleep", lambda x: None)
+    monkeypatch.setattr("time.monotonic", lambda: 0.0)
 
     fetch_mod._watch_loop("https://example.com", 30.0, 5.0)  # must return, not raise
 
@@ -153,8 +155,8 @@ def test_backoff_delay_custom_cap():
     assert _backoff_delay(10, cap=30.0) == 30.0
 
 
-def test_watch_uses_backoff_sleep_on_consecutive_failures(monkeypatch):
-    """Each successive failure sleeps for a longer backoff (1s, 2s, 4s…)."""
+def test_watch_uses_backoff_sleep_on_consecutive_http_failures(monkeypatch):
+    """Each successive HTTP failure sleeps for a longer backoff (1s, 2s, 4s…)."""
     call_count = 0
     sleep_times = []
 
@@ -163,10 +165,11 @@ def test_watch_uses_backoff_sleep_on_consecutive_failures(monkeypatch):
         call_count += 1
         if call_count >= 4:
             raise KeyboardInterrupt
-        raise RuntimeError("network error")
+        raise httpx.RequestError("timeout")
 
     monkeypatch.setattr(fetch_mod, "_fetch_from_url", mock_fetch)
     monkeypatch.setattr("time.sleep", lambda x: sleep_times.append(x))
+    monkeypatch.setattr("time.monotonic", lambda: 0.0)
 
     fetch_mod._watch_loop("https://example.com", 30.0, 5.0)
 
@@ -183,7 +186,7 @@ def test_watch_resets_backoff_after_success(monkeypatch):
         call_count += 1
         # calls 1,2 fail; call 3 succeeds; call 4 fails; call 5 stops the loop
         if call_count in (1, 2, 4):
-            raise RuntimeError("network error")
+            raise httpx.RequestError("timeout")
         if call_count == 5:
             raise KeyboardInterrupt
         return b""
@@ -192,12 +195,35 @@ def test_watch_resets_backoff_after_success(monkeypatch):
     monkeypatch.setattr(fetch_mod, "_parse_feed", lambda _: MagicMock())
     monkeypatch.setattr(fetch_mod, "_feed_to_ndjson_line", lambda _: "{}")
     monkeypatch.setattr("time.sleep", lambda x: sleep_times.append(x))
-    monkeypatch.setattr("time.monotonic", lambda: 0.0)  # next_wake always = interval
+    monkeypatch.setattr("time.monotonic", lambda: 0.0)
 
     fetch_mod._watch_loop("https://example.com", 30.0, 5.0)
 
     # failure 1→backoff(1)=1, failure 2→backoff(2)=2, success→interval=5, failure 1→backoff(1)=1
     assert sleep_times == [1.0, 2.0, 5.0, 1.0]
+
+
+def test_watch_parse_error_does_not_trigger_backoff(monkeypatch):
+    """A parse error after a successful HTTP fetch does not increment the backoff counter."""
+    call_count = 0
+    sleep_times = []
+
+    def mock_fetch(url, timeout, client=None):
+        nonlocal call_count
+        call_count += 1
+        if call_count >= 3:
+            raise KeyboardInterrupt
+        return b""  # HTTP succeeds every time
+
+    monkeypatch.setattr(fetch_mod, "_fetch_from_url", mock_fetch)
+    monkeypatch.setattr(fetch_mod, "_parse_feed", lambda _: (_ for _ in ()).throw(RuntimeError("bad proto")))
+    monkeypatch.setattr("time.sleep", lambda x: sleep_times.append(x))
+    monkeypatch.setattr("time.monotonic", lambda: 0.0)
+
+    fetch_mod._watch_loop("https://example.com", 30.0, 5.0)
+
+    # Both iterations should sleep the full interval, not a backoff
+    assert sleep_times == [5.0, 5.0]
 
 
 def test_feed_to_ndjson_line_is_single_line():
@@ -239,10 +265,11 @@ def test_watch_reuses_http_client(monkeypatch):
         clients_seen.append(client)
         if call_count >= 3:
             raise KeyboardInterrupt
-        raise RuntimeError("simulated error")
+        raise httpx.RequestError("simulated error")
 
     monkeypatch.setattr(fetch_mod, "_fetch_from_url", mock_fetch)
     monkeypatch.setattr("time.sleep", lambda x: None)
+    monkeypatch.setattr("time.monotonic", lambda: 0.0)
 
     fetch_mod._watch_loop("https://example.com", 30.0, 5.0)
 
