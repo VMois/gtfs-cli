@@ -55,6 +55,71 @@ def test_watch_with_local_file_exits_with_error():
     assert "URL source" in result.output
 
 
+def test_backoff_delay_doubles_each_failure():
+    from gtfs_cli.commands.fetch import _backoff_delay
+    assert _backoff_delay(1) == 1.0
+    assert _backoff_delay(2) == 2.0
+    assert _backoff_delay(3) == 4.0
+    assert _backoff_delay(4) == 8.0
+
+
+def test_backoff_delay_capped_at_60():
+    from gtfs_cli.commands.fetch import _backoff_delay
+    assert _backoff_delay(10) == 60.0
+    assert _backoff_delay(100) == 60.0
+
+
+def test_backoff_delay_custom_cap():
+    from gtfs_cli.commands.fetch import _backoff_delay
+    assert _backoff_delay(10, cap=30.0) == 30.0
+
+
+def test_watch_uses_backoff_sleep_on_consecutive_failures(monkeypatch):
+    """Each successive failure sleeps for a longer backoff (1s, 2s, 4s…)."""
+    call_count = 0
+    sleep_times = []
+
+    def mock_fetch(url, timeout, client=None):
+        nonlocal call_count
+        call_count += 1
+        if call_count >= 4:
+            raise KeyboardInterrupt
+        raise RuntimeError("network error")
+
+    monkeypatch.setattr(fetch_mod, "_fetch_from_url", mock_fetch)
+    monkeypatch.setattr("time.sleep", lambda x: sleep_times.append(x))
+
+    fetch_mod._watch_loop("https://example.com", 30.0, 5.0)
+
+    assert sleep_times == [1.0, 2.0, 4.0]
+
+
+def test_watch_resets_backoff_after_success(monkeypatch):
+    """A successful fetch resets the failure counter so backoff restarts from 1s."""
+    call_count = 0
+    sleep_times = []
+
+    def mock_fetch(url, timeout, client=None):
+        nonlocal call_count
+        call_count += 1
+        # calls 1,2 fail; call 3 succeeds; call 4 fails; call 5 stops the loop
+        if call_count in (1, 2, 4):
+            raise RuntimeError("network error")
+        if call_count == 5:
+            raise KeyboardInterrupt
+        return b""
+
+    monkeypatch.setattr(fetch_mod, "_fetch_from_url", mock_fetch)
+    monkeypatch.setattr(fetch_mod, "_parse_feed", lambda _: MagicMock())
+    monkeypatch.setattr(fetch_mod, "_feed_to_ndjson_line", lambda _: "{}")
+    monkeypatch.setattr("time.sleep", lambda x: sleep_times.append(x))
+
+    fetch_mod._watch_loop("https://example.com", 30.0, 5.0)
+
+    # failure 1→backoff(1)=1, failure 2→backoff(2)=2, success→interval=5, failure 1→backoff(1)=1
+    assert sleep_times == [1.0, 2.0, 5.0, 1.0]
+
+
 def test_feed_to_ndjson_line_is_single_line():
     """_feed_to_ndjson_line should produce compact single-line JSON."""
     data = TRIP_UPDATE_PB.read_bytes()
