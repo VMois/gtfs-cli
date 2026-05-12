@@ -1,8 +1,11 @@
+import json
 import sys
+import time
 from pathlib import Path
+from typing import Optional
 
 import typer
-from google.protobuf.json_format import MessageToJson
+from google.protobuf.json_format import MessageToDict, MessageToJson
 from google.transit import gtfs_realtime_pb2
 
 
@@ -31,6 +34,12 @@ def _parse_feed(data: bytes) -> gtfs_realtime_pb2.FeedMessage:
     return feed
 
 
+def _feed_to_ndjson_line(feed: gtfs_realtime_pb2.FeedMessage) -> str:
+    """Convert a FeedMessage to a single-line JSON string (for NDJSON output)."""
+    d = MessageToDict(feed, preserving_proto_field_name=True)
+    return json.dumps(d, separators=(",", ":"))
+
+
 def fetch(
     source: str = typer.Argument(
         help="URL or local file path to a GTFS-RT protobuf feed.",
@@ -38,6 +47,10 @@ def fetch(
     timeout: float = typer.Option(
         30.0,
         help="HTTP request timeout in seconds (only applies to URL sources).",
+    ),
+    watch: Optional[float] = typer.Option(
+        None,
+        help="Continuously fetch at this interval (seconds). Outputs NDJSON. URL sources only.",
     ),
 ) -> None:
     """Fetch GTFS-RT data and output as JSON.
@@ -51,7 +64,21 @@ def fetch(
         gtfs-cli fetch trips.pb
 
         gtfs-cli fetch feed.pb | jq '.entity[] | .alert'
+
+        gtfs-cli fetch --watch 30 "https://gtfsrt.ttc.ca/trips/update?format=binary"
+
+        gtfs-cli fetch --watch 30 "https://gtfsrt.ttc.ca/trips/update?format=binary" | jq --unbuffered '.entity | length'
     """
+    if watch is not None:
+        if not _is_url(source):
+            print(
+                "Error: --watch requires a URL source (watching a local file is not supported).",
+                file=sys.stderr,
+            )
+            raise typer.Exit(code=1)
+        _watch_loop(source, timeout, watch)
+        return
+
     try:
         if _is_url(source):
             data = _fetch_from_url(source, timeout)
@@ -72,3 +99,20 @@ def fetch(
 
     json_output = MessageToJson(feed, preserving_proto_field_name=True)
     print(json_output)
+
+
+def _watch_loop(url: str, timeout: float, interval: float) -> None:
+    """Continuously fetch a GTFS-RT feed and output NDJSON lines."""
+    try:
+        while True:
+            try:
+                data = _fetch_from_url(url, timeout)
+                feed = _parse_feed(data)
+                print(_feed_to_ndjson_line(feed))
+                sys.stdout.flush()
+            except Exception as e:
+                print(f"Error: {e}", file=sys.stderr)
+
+            time.sleep(interval)
+    except KeyboardInterrupt:
+        pass
