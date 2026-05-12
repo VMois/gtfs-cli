@@ -1,8 +1,10 @@
 import json
 from pathlib import Path
+from unittest.mock import MagicMock
 
 from typer.testing import CliRunner
 
+import gtfs_cli.commands.fetch as fetch_mod
 from gtfs_cli.commands.fetch import _feed_to_ndjson_line, _parse_feed
 from gtfs_cli.main import app
 
@@ -66,6 +68,42 @@ def test_feed_to_ndjson_line_is_single_line():
     parsed = json.loads(line)
     assert "header" in parsed
     assert "entity" in parsed
+
+
+def test_fetch_from_url_uses_provided_client():
+    """_fetch_from_url calls client.get() instead of httpx.get() when a client is supplied."""
+    fake_response = MagicMock()
+    fake_response.content = b"data"
+    fake_client = MagicMock()
+    fake_client.get.return_value = fake_response
+
+    result = fetch_mod._fetch_from_url("https://example.com", 30.0, client=fake_client)
+
+    fake_client.get.assert_called_once_with("https://example.com")
+    assert result == b"data"
+
+
+def test_watch_reuses_http_client(monkeypatch):
+    """_watch_loop creates one httpx.Client and passes the same instance to every fetch."""
+    call_count = 0
+    clients_seen = []
+
+    def mock_fetch(url, timeout, client=None):
+        nonlocal call_count
+        call_count += 1
+        clients_seen.append(client)
+        if call_count >= 3:
+            raise KeyboardInterrupt
+        raise RuntimeError("simulated error")
+
+    monkeypatch.setattr(fetch_mod, "_fetch_from_url", mock_fetch)
+    monkeypatch.setattr("time.sleep", lambda x: None)
+
+    fetch_mod._watch_loop("https://example.com", 30.0, 5.0)
+
+    assert call_count == 3
+    assert clients_seen[0] is not None
+    assert all(c is clients_seen[0] for c in clients_seen)
 
 
 def test_feed_to_ndjson_line_preserves_proto_field_names():
