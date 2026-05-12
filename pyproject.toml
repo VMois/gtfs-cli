@@ -5,6 +5,17 @@ description = "CLI tool to fetch, archive, process and explore GTFS-RT data"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
+authors = [{ name = "Vladyslav Moisieienkov" }]
+keywords = ["gtfs", "gtfs-rt", "transit", "cli", "realtime"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Environment :: Console",
+    "Topic :: Scientific/Engineering :: GIS",
+]
 dependencies = [
     "typer>=0.15.0",
     "rich>=13.0.0",
@@ -15,6 +26,11 @@ dependencies = [
 
 [project.scripts]
 gtfs-cli = "gtfs_cli.main:app"
+
+[project.urls]
+Homepage = "https://github.com/VMois/gtfs-cli"
+Repository = "https://github.com/VMois/gtfs-cli"
+"Bug Tracker" = "https://github.com/VMois/gtfs-cli/issues"
 
 [build-system]
 requires = ["hatchling"]
