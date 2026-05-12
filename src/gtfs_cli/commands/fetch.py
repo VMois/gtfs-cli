@@ -38,6 +38,11 @@ def _parse_feed(data: bytes) -> gtfs_realtime_pb2.FeedMessage:
     return feed
 
 
+def _remaining_sleep(next_wake: float) -> float:
+    """Seconds until next_wake on the monotonic clock. Never negative."""
+    return max(0.0, next_wake - time.monotonic())
+
+
 def _backoff_delay(consecutive_failures: int, cap: float = 60.0) -> float:
     """Exponential backoff: 1s, 2s, 4s, …, capped at `cap` seconds."""
     return min(2.0 ** (consecutive_failures - 1), cap)
@@ -125,13 +130,14 @@ def _watch_loop(url: str, timeout: float, interval: float) -> None:
     try:
         with httpx.Client(timeout=timeout, follow_redirects=True) as client:
             while not shutdown:
+                next_wake = time.monotonic() + interval
                 try:
                     data = _fetch_from_url(url, timeout, client=client)
                     feed = _parse_feed(data)
                     print(_feed_to_ndjson_line(feed))
                     sys.stdout.flush()
                     consecutive_failures = 0
-                    time.sleep(interval)
+                    time.sleep(_remaining_sleep(next_wake))
                 except Exception as e:
                     print(f"Error: {e}", file=sys.stderr)
                     consecutive_failures += 1
