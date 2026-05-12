@@ -61,12 +61,11 @@ gtfs-cli fetch --watch 30 "https://gtfsrt.ttc.ca/trips/update?format=binary" \
 
 Watch mode handles transient failures gracefully: HTTP and network errors are retried with exponential backoff (1s → 2s → 4s … capped at 60s). Stop with `Ctrl+C` or `SIGTERM`.
 
-**Options:**
+For all available options, run:
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--timeout` | `30.0` | HTTP request timeout in seconds |
-| `--watch` | — | Poll interval in seconds (URL sources only) |
+```bash
+gtfs-cli fetch --help
+```
 
 ## Development
 
