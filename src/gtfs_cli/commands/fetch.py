@@ -13,10 +13,13 @@ def _is_url(source: str) -> bool:
     return source.startswith("http://") or source.startswith("https://")
 
 
-def _fetch_from_url(url: str, timeout: float) -> bytes:
+def _fetch_from_url(url: str, timeout: float, client=None) -> bytes:
     import httpx
 
-    response = httpx.get(url, timeout=timeout, follow_redirects=True)
+    if client is not None:
+        response = client.get(url)
+    else:
+        response = httpx.get(url, timeout=timeout, follow_redirects=True)
     response.raise_for_status()
     return response.content
 
@@ -103,16 +106,19 @@ def fetch(
 
 def _watch_loop(url: str, timeout: float, interval: float) -> None:
     """Continuously fetch a GTFS-RT feed and output NDJSON lines."""
-    try:
-        while True:
-            try:
-                data = _fetch_from_url(url, timeout)
-                feed = _parse_feed(data)
-                print(_feed_to_ndjson_line(feed))
-                sys.stdout.flush()
-            except Exception as e:
-                print(f"Error: {e}", file=sys.stderr)
+    import httpx
 
-            time.sleep(interval)
+    try:
+        with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+            while True:
+                try:
+                    data = _fetch_from_url(url, timeout, client=client)
+                    feed = _parse_feed(data)
+                    print(_feed_to_ndjson_line(feed))
+                    sys.stdout.flush()
+                except Exception as e:
+                    print(f"Error: {e}", file=sys.stderr)
+
+                time.sleep(interval)
     except KeyboardInterrupt:
         pass
