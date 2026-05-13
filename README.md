@@ -28,6 +28,40 @@ gtfs-cli static info ttc/
 gtfs-cli static info
 ```
 
+**Example output:**
+
+```
+  Agency  TTC
+Timezone  America/Toronto
+Language  en
+   Valid  2026-05-03 → 2026-06-06  (34 days)
+Feed age  9 days · expires in 25 days
+
+     Stops  9,378
+    Routes  232
+     Trips  134,882
+Stop times  4,261,259
+    Shapes  434,460 points across 1,550 shapes
+
+Route types
+  Bus                210
+  Tram / Light Rail   19
+  Subway / Metro       3
+
+Service days
+  Mon  Tue  Wed  Thu  Fri  Sat  Sun
+
+Files
+  Required  agency  stops  routes  trips  stop_times  calendar
+  Optional  shapes  calendar_dates
+  Missing   feed_info  frequencies  transfers  fare_attributes  fare_rules
+
+Largest files
+  stop_times.txt  203 MB  4,261,259 rows
+  shapes.txt       18 MB    434,460 rows
+  trips.txt        12 MB    134,882 rows
+```
+
 For all available options, run:
 
 ```bash
@@ -37,6 +71,38 @@ gtfs-cli static info --help
 ### `fetch`
 
 Fetch a GTFS-RT feed from a URL or local file and output it as JSON.
+
+**Example output:**
+
+```json
+{
+  "header": {
+    "gtfs_realtime_version": "2.0",
+    "incrementality": "FULL_DATASET",
+    "timestamp": "1778642963"
+  },
+  "entity": [
+    {
+      "id": "1",
+      "trip_update": {
+        "trip": {
+          "trip_id": "39051020",
+          "route_id": "73",
+          "schedule_relationship": "SCHEDULED"
+        },
+        "stop_time_update": [
+          {
+            "stop_sequence": 31,
+            "arrival": { "time": "1778642961" },
+            "stop_id": "1732",
+            "schedule_relationship": "SCHEDULED"
+          }
+        ]
+      }
+    }
+  ]
+}
+```
 
 ```bash
 # Fetch live trip updates
