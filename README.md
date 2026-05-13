@@ -1,5 +1,7 @@
 # gtfs-cli
 
+[![PyPI](https://img.shields.io/pypi/v/gtfs-cli)](https://pypi.org/project/gtfs-cli/)
+
 CLI tool to fetch, process, and explore [GTFS](https://gtfs.org/) transit data — both realtime (GTFS-RT) and static schedules. Follows Unix philosophy: each command does one thing and writes to stdout, composing naturally with tools like `curl`, `unzip`, and `jq`.
 
 ## Installation
