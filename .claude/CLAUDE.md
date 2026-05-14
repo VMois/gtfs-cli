@@ -72,6 +72,7 @@ curl https://gtfsrt.ttc.ca/trips/update?format=binary -o test_trip_updates.pb
 - Include usage examples in --help
 - CLI interfaces are an API - version appropriately with semantic versioning
 - Write unit tests whenever you can; make sure not to use network when they are run
+- When adding or changing a feature, update README.md examples and docs if they are affected
 
 ## Project structure
 
