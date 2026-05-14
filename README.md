@@ -4,6 +4,12 @@
 
 CLI tool to fetch, process, and explore [GTFS](https://gtfs.org/) transit data — both realtime (GTFS-RT) and static schedules. Follows Unix philosophy: each command does one thing and writes to stdout, composing naturally with tools like `curl`, `unzip`, and `jq`.
 
+> **Note:** `gtfs-cli` is in active development. All `0.x.x` releases are subject to breaking changes.
+
+## Goal
+
+To become a Swiss Army knife CLI for working with public transit open data — GTFS static schedules, GTFS-RT real-time feeds, bike share data, and more.
+
 ## Installation
 
 ```bash
