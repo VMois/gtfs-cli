@@ -4,10 +4,12 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import httpx
+import pytest
+from google.transit import gtfs_realtime_pb2
 from typer.testing import CliRunner
 
 import gtfs_cli.commands.fetch as fetch_mod
-from gtfs_cli.commands.fetch import _feed_to_ndjson_line, _parse_feed
+from gtfs_cli.commands.fetch import _feed_to_geojson_dict, _feed_to_ndjson_line, _parse_feed
 from gtfs_cli.main import app
 
 
@@ -372,3 +374,129 @@ def test_feed_to_ndjson_line_preserves_proto_field_names():
 
     assert "gtfs_realtime_version" in parsed["header"]
     assert "gtfsRealtimeVersion" not in parsed["header"]
+
+
+# ---------------------------------------------------------------------------
+# GeoJSON helpers
+# ---------------------------------------------------------------------------
+
+def _make_vehicle_feed(vehicles: list[dict]) -> gtfs_realtime_pb2.FeedMessage:
+    """Build a synthetic FeedMessage with vehicle position entities for testing."""
+    feed = gtfs_realtime_pb2.FeedMessage()
+    feed.header.gtfs_realtime_version = "2.0"
+    for v in vehicles:
+        entity = feed.entity.add()
+        entity.id = v.get("id", "v1")
+        vp = entity.vehicle
+        vp.trip.trip_id = v.get("trip_id", "")
+        vp.trip.route_id = v.get("route_id", "")
+        vp.position.latitude = v["lat"]
+        vp.position.longitude = v["lon"]
+        if "bearing" in v:
+            vp.position.bearing = v["bearing"]
+        if "speed" in v:
+            vp.position.speed = v["speed"]
+        if "timestamp" in v:
+            vp.timestamp = v["timestamp"]
+    return feed
+
+
+def test_feed_to_geojson_dict_with_vehicles():
+    feed = _make_vehicle_feed([
+        {"id": "v1", "lat": 43.65, "lon": -79.38, "trip_id": "T1", "route_id": "R1", "bearing": 90.0, "speed": 12.5, "timestamp": 1700000000},
+        {"id": "v2", "lat": 43.70, "lon": -79.42, "trip_id": "T2", "route_id": "R2"},
+    ])
+    result = _feed_to_geojson_dict(feed)
+
+    assert result["type"] == "FeatureCollection"
+    assert len(result["features"]) == 2
+
+    f1 = result["features"][0]
+    assert f1["type"] == "Feature"
+    assert f1["geometry"]["type"] == "Point"
+    # GeoJSON coordinates are [longitude, latitude]; proto float is 32-bit so use approx
+    assert f1["geometry"]["coordinates"] == pytest.approx([-79.38, 43.65], rel=1e-4)
+    assert f1["properties"]["vehicle_id"] == "v1"
+    assert f1["properties"]["trip_id"] == "T1"
+    assert f1["properties"]["route_id"] == "R1"
+    assert f1["properties"]["bearing"] == pytest.approx(90.0, rel=1e-4)
+    assert f1["properties"]["speed"] == pytest.approx(12.5, rel=1e-4)
+    assert f1["properties"]["timestamp"] == 1700000000
+
+
+def test_feed_to_geojson_dict_non_vehicle_feed():
+    """A trip-update feed has no vehicle positions — output is an empty FeatureCollection."""
+    data = TRIP_UPDATE_PB.read_bytes()
+    feed = _parse_feed(data)
+    result = _feed_to_geojson_dict(feed)
+
+    assert result["type"] == "FeatureCollection"
+    assert result["features"] == []
+
+
+def test_feed_to_geojson_dict_skips_entity_without_position():
+    """An entity that has a vehicle field but no position should be skipped."""
+    feed = gtfs_realtime_pb2.FeedMessage()
+    feed.header.gtfs_realtime_version = "2.0"
+    entity = feed.entity.add()
+    entity.id = "v1"
+    # Set vehicle but leave position unset
+    entity.vehicle.trip.trip_id = "T1"
+
+    result = _feed_to_geojson_dict(feed)
+    assert result["features"] == []
+
+
+def test_fetch_geojson_format_outputs_feature_collection():
+    result = runner.invoke(app, ["fetch", "--format", "geojson", str(TRIP_UPDATE_PB)])
+    assert result.exit_code == 0
+    output = json.loads(result.output)
+    assert output["type"] == "FeatureCollection"
+    assert isinstance(output["features"], list)
+
+
+def test_fetch_geojson_is_pretty_printed():
+    """One-shot geojson output should be indented, not compact."""
+    result = runner.invoke(app, ["fetch", "--format", "geojson", str(TRIP_UPDATE_PB)])
+    assert "\n" in result.output
+
+
+def test_watch_geojson_outputs_compact_ndjson(monkeypatch):
+    """Watch mode with --format geojson should emit one compact GeoJSON line per iteration."""
+    call_count = 0
+    stop_event = _ImmediateEvent()
+    captured_lines = []
+
+    feed = _make_vehicle_feed([{"id": "v1", "lat": 43.65, "lon": -79.38}])
+
+    def mock_fetch(url, timeout, client=None):
+        nonlocal call_count
+        call_count += 1
+        if call_count >= 2:
+            raise KeyboardInterrupt
+        return feed.SerializeToString()
+
+    monkeypatch.setattr(fetch_mod, "_fetch_from_url", mock_fetch)
+    monkeypatch.setattr("time.monotonic", lambda: 0.0)
+
+    import builtins
+    original_print = builtins.print
+
+    def capture_print(*args, **kwargs):
+        if kwargs.get("file") is None:
+            captured_lines.append(args[0] if args else "")
+        else:
+            original_print(*args, **kwargs)
+
+    monkeypatch.setattr(builtins, "print", capture_print)
+
+    from gtfs_cli.commands.fetch import OutputFormat
+    fetch_mod._watch_loop("https://example.com", 30.0, 5.0, OutputFormat.geojson, _stop_event=stop_event)
+
+    assert len(captured_lines) == 1
+    parsed = json.loads(captured_lines[0])
+    assert parsed["type"] == "FeatureCollection"
+    assert len(parsed["features"]) == 1
+    assert parsed["features"][0]["geometry"]["coordinates"] == pytest.approx([-79.38, 43.65], rel=1e-4)
+    # Must be a single compact line (no embedded newlines)
+    assert "\n" not in captured_lines[0]
