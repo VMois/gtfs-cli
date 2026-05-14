@@ -9,7 +9,14 @@ from google.transit import gtfs_realtime_pb2
 from typer.testing import CliRunner
 
 import gtfs_cli.commands.fetch as fetch_mod
-from gtfs_cli.commands.fetch import _feed_to_geojson_dict, _feed_to_ndjson_line, _parse_feed
+from gtfs_cli.commands.fetch import (
+    FeedType,
+    _check_geojson_compatible,
+    _detect_feed_type,
+    _feed_to_geojson_dict,
+    _feed_to_ndjson_line,
+    _parse_feed,
+)
 from gtfs_cli.main import app
 
 
@@ -447,17 +454,130 @@ def test_feed_to_geojson_dict_skips_entity_without_position():
     assert result["features"] == []
 
 
-def test_fetch_geojson_format_outputs_feature_collection():
+# ---------------------------------------------------------------------------
+# _detect_feed_type
+# ---------------------------------------------------------------------------
+
+def test_detect_feed_type_vehicle_positions():
+    feed = _make_vehicle_feed([{"id": "v1", "lat": 43.65, "lon": -79.38}])
+    assert _detect_feed_type(feed) == FeedType.VEHICLE_POSITIONS
+
+
+def test_detect_feed_type_trip_updates():
+    data = TRIP_UPDATE_PB.read_bytes()
+    feed = _parse_feed(data)
+    assert _detect_feed_type(feed) == FeedType.TRIP_UPDATES
+
+
+def test_detect_feed_type_alerts():
+    feed = gtfs_realtime_pb2.FeedMessage()
+    feed.header.gtfs_realtime_version = "2.0"
+    entity = feed.entity.add()
+    entity.id = "a1"
+    entity.alert.cause = gtfs_realtime_pb2.Alert.UNKNOWN_CAUSE
+    assert _detect_feed_type(feed) == FeedType.ALERTS
+
+
+def test_detect_feed_type_unknown_for_empty_feed():
+    feed = gtfs_realtime_pb2.FeedMessage()
+    feed.header.gtfs_realtime_version = "2.0"
+    assert _detect_feed_type(feed) == FeedType.UNKNOWN
+
+
+def test_detect_feed_type_mixed():
+    feed = gtfs_realtime_pb2.FeedMessage()
+    feed.header.gtfs_realtime_version = "2.0"
+    e1 = feed.entity.add()
+    e1.id = "v1"
+    e1.vehicle.position.latitude = 43.65
+    e1.vehicle.position.longitude = -79.38
+    e2 = feed.entity.add()
+    e2.id = "a1"
+    e2.alert.cause = gtfs_realtime_pb2.Alert.UNKNOWN_CAUSE
+    assert _detect_feed_type(feed) == FeedType.MIXED
+
+
+# ---------------------------------------------------------------------------
+# _check_geojson_compatible
+# ---------------------------------------------------------------------------
+
+def test_check_geojson_compatible_passes_for_vehicle_feed():
+    feed = _make_vehicle_feed([{"id": "v1", "lat": 43.65, "lon": -79.38}])
+    _check_geojson_compatible(feed)  # must not raise
+
+
+def test_check_geojson_compatible_passes_for_empty_feed():
+    feed = gtfs_realtime_pb2.FeedMessage()
+    feed.header.gtfs_realtime_version = "2.0"
+    _check_geojson_compatible(feed)  # UNKNOWN is treated as valid (empty vehicle feed)
+
+
+def test_check_geojson_compatible_raises_for_trip_update_feed():
+    data = TRIP_UPDATE_PB.read_bytes()
+    feed = _parse_feed(data)
+    with pytest.raises(ValueError, match="trip_updates"):
+        _check_geojson_compatible(feed)
+
+
+def test_check_geojson_compatible_raises_for_alert_feed():
+    feed = gtfs_realtime_pb2.FeedMessage()
+    feed.header.gtfs_realtime_version = "2.0"
+    entity = feed.entity.add()
+    entity.id = "a1"
+    entity.alert.cause = gtfs_realtime_pb2.Alert.UNKNOWN_CAUSE
+    with pytest.raises(ValueError, match="alerts"):
+        _check_geojson_compatible(feed)
+
+
+def test_fetch_geojson_trip_update_feed_exits_with_error():
     result = runner.invoke(app, ["fetch", "--format", "geojson", str(TRIP_UPDATE_PB)])
+    assert result.exit_code == 1
+    assert "trip_updates" in result.output
+
+
+def test_watch_geojson_stops_on_incompatible_feed(monkeypatch, caplog):
+    """Watch loop should stop and log an error when a non-vehicle feed is received."""
+    import logging
+
+    data = TRIP_UPDATE_PB.read_bytes()
+    call_count = 0
+    stop_event = _ImmediateEvent()
+
+    def mock_fetch(url, timeout, client=None):
+        nonlocal call_count
+        call_count += 1
+        return data
+
+    monkeypatch.setattr(fetch_mod, "_fetch_from_url", mock_fetch)
+    monkeypatch.setattr("time.monotonic", lambda: 0.0)
+
+    from gtfs_cli.commands.fetch import OutputFormat
+    with caplog.at_level(logging.ERROR, logger="gtfs_cli.commands.fetch"):
+        fetch_mod._watch_loop("https://example.com", 30.0, 5.0, OutputFormat.geojson, _stop_event=stop_event)
+
+    assert call_count == 1  # stopped after first incompatible feed
+    assert any("trip_updates" in r.message for r in caplog.records)
+
+
+def test_fetch_geojson_format_outputs_feature_collection(tmp_path):
+    pb_file = tmp_path / "vehicles.pb"
+    feed = _make_vehicle_feed([{"id": "v1", "lat": 43.65, "lon": -79.38}])
+    pb_file.write_bytes(feed.SerializeToString())
+
+    result = runner.invoke(app, ["fetch", "--format", "geojson", str(pb_file)])
     assert result.exit_code == 0
     output = json.loads(result.output)
     assert output["type"] == "FeatureCollection"
     assert isinstance(output["features"], list)
 
 
-def test_fetch_geojson_is_pretty_printed():
+def test_fetch_geojson_is_pretty_printed(tmp_path):
     """One-shot geojson output should be indented, not compact."""
-    result = runner.invoke(app, ["fetch", "--format", "geojson", str(TRIP_UPDATE_PB)])
+    pb_file = tmp_path / "vehicles.pb"
+    feed = _make_vehicle_feed([{"id": "v1", "lat": 43.65, "lon": -79.38}])
+    pb_file.write_bytes(feed.SerializeToString())
+
+    result = runner.invoke(app, ["fetch", "--format", "geojson", str(pb_file)])
     assert "\n" in result.output
 
 

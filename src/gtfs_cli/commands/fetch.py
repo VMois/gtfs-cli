@@ -17,6 +17,14 @@ class OutputFormat(str, enum.Enum):
     json = "json"
     geojson = "geojson"
 
+
+class FeedType(enum.Enum):
+    VEHICLE_POSITIONS = "vehicle_positions"
+    TRIP_UPDATES = "trip_updates"
+    ALERTS = "alerts"
+    MIXED = "mixed"
+    UNKNOWN = "unknown"
+
 logging.basicConfig(
     level=logging.ERROR,
     format="%(asctime)s %(levelname)s %(message)s",
@@ -68,6 +76,43 @@ def _feed_to_ndjson_line(feed: gtfs_realtime_pb2.FeedMessage) -> str:
     """Convert a FeedMessage to a single-line JSON string (for NDJSON output)."""
     d = MessageToDict(feed, preserving_proto_field_name=True)
     return json.dumps(d, separators=(",", ":"))
+
+
+def _detect_feed_type(feed: gtfs_realtime_pb2.FeedMessage) -> FeedType:
+    """Infer feed type from the first entity's populated field.
+
+    GTFS-RT feeds are almost always homogeneous (all entities are the same
+    type), so inspecting the first entity is sufficient. Returns UNKNOWN for
+    empty feeds and MIXED when the first two entities disagree.
+    """
+    detected: FeedType | None = None
+    for entity in feed.entity:
+        if entity.HasField("vehicle"):
+            kind = FeedType.VEHICLE_POSITIONS
+        elif entity.HasField("trip_update"):
+            kind = FeedType.TRIP_UPDATES
+        elif entity.HasField("alert"):
+            kind = FeedType.ALERTS
+        else:
+            continue
+
+        if detected is None:
+            detected = kind
+        elif detected != kind:
+            return FeedType.MIXED
+        else:
+            break  # two entities agree — no need to scan further
+
+    return detected if detected is not None else FeedType.UNKNOWN
+
+
+def _check_geojson_compatible(feed: gtfs_realtime_pb2.FeedMessage) -> None:
+    """Raise ValueError if the feed is not a vehicle position feed."""
+    feed_type = _detect_feed_type(feed)
+    if feed_type not in (FeedType.VEHICLE_POSITIONS, FeedType.UNKNOWN):
+        raise ValueError(
+            f"Feed contains {feed_type.value}; --format geojson only supports vehicle position feeds."
+        )
 
 
 def _feed_to_geojson_dict(feed: gtfs_realtime_pb2.FeedMessage) -> dict:
@@ -178,6 +223,11 @@ def fetch(
         raise typer.Exit(code=1)
 
     if output_format == OutputFormat.geojson:
+        try:
+            _check_geojson_compatible(feed)
+        except ValueError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            raise typer.Exit(code=1)
         print(json.dumps(_feed_to_geojson_dict(feed), indent=2))
     else:
         print(MessageToJson(feed, preserving_proto_field_name=True))
@@ -216,11 +266,16 @@ def _watch_loop(
                 try:
                     feed = _parse_feed(data)
                     if output_format == OutputFormat.geojson:
+                        _check_geojson_compatible(feed)
                         line = _feed_to_geojson_line(feed)
                     else:
                         line = _feed_to_ndjson_line(feed)
                     print(line)
                     sys.stdout.flush()
+                except ValueError as e:
+                    logger.error("Format error: %s", e)
+                    stop_event.set()
+                    break
                 except BrokenPipeError:
                     stop_event.set()
                     break
