@@ -206,3 +206,8 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 dist/
+
+# Scratch / test output files
+*.geojson
+*.geojsonl
+*.pb
