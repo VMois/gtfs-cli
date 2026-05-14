@@ -1,6 +1,6 @@
 [project]
 name = "gtfs-cli"
-version = "0.3.0"
+version = "0.4.0"
 description = "CLI tool to fetch, archive, process and explore GTFS-RT data"
 readme = "README.md"
 license = "MIT"

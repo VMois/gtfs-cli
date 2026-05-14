@@ -16,6 +16,7 @@ from google.transit import gtfs_realtime_pb2
 class OutputFormat(str, enum.Enum):
     json = "json"
     geojson = "geojson"
+    geojsonl = "geojsonl"
 
 
 class FeedType(enum.Enum):
@@ -111,16 +112,14 @@ def _check_geojson_compatible(feed: gtfs_realtime_pb2.FeedMessage) -> None:
     feed_type = _detect_feed_type(feed)
     if feed_type not in (FeedType.VEHICLE_POSITIONS, FeedType.UNKNOWN):
         raise ValueError(
-            f"Feed contains {feed_type.value}; --format geojson only supports vehicle position feeds."
+            f"Feed contains {feed_type.value}; geojson/geojsonl formats only support vehicle position feeds."
         )
 
 
-def _feed_to_geojson_dict(feed: gtfs_realtime_pb2.FeedMessage) -> dict:
-    """Extract vehicle positions from a FeedMessage as a GeoJSON FeatureCollection dict.
+def _feed_to_geojson_features(feed: gtfs_realtime_pb2.FeedMessage) -> list[dict]:
+    """Extract vehicle positions from a FeedMessage as a list of GeoJSON Feature dicts.
 
-    Entities without a vehicle position are silently skipped, so this is safe
-    to call on any feed type (alerts, trip updates, etc.) — you'll just get an
-    empty FeatureCollection.
+    Entities without a vehicle position are silently skipped.
     """
     features = []
     for entity in feed.entity:
@@ -148,12 +147,17 @@ def _feed_to_geojson_dict(feed: gtfs_realtime_pb2.FeedMessage) -> dict:
                 },
             }
         )
+    return features
+
+
+def _features_to_feature_collection(features: list[dict]) -> dict:
+    """Wrap a list of GeoJSON Feature dicts in a FeatureCollection."""
     return {"type": "FeatureCollection", "features": features}
 
 
-def _feed_to_geojson_line(feed: gtfs_realtime_pb2.FeedMessage) -> str:
-    """Compact single-line GeoJSON FeatureCollection (for NDJSON watch output)."""
-    return json.dumps(_feed_to_geojson_dict(feed), separators=(",", ":"))
+def _features_to_geojsonl(features: list[dict]) -> str:
+    """Serialize GeoJSON features to GeoJSONL: one minified Feature per line (RFC 8142)."""
+    return "\n".join(json.dumps(f, separators=(",", ":")) for f in features)
 
 
 def fetch(
@@ -171,7 +175,7 @@ def fetch(
     output_format: OutputFormat = typer.Option(
         OutputFormat.json,
         "--format",
-        help="Output format. geojson extracts vehicle positions only.",
+        help="Output format. geojson and geojsonl extract vehicle positions only.",
     ),
 ) -> None:
     """Fetch GTFS-RT data and output as JSON.
@@ -193,6 +197,10 @@ def fetch(
         gtfs-cli fetch --format geojson "https://gtfsrt.ttc.ca/vehicles/position?format=binary"
 
         gtfs-cli fetch --format geojson --watch 30 "https://gtfsrt.ttc.ca/vehicles/position?format=binary"
+
+        gtfs-cli fetch --format geojsonl "https://gtfsrt.ttc.ca/vehicles/position?format=binary"
+
+        gtfs-cli fetch --format geojsonl --watch 30 "https://gtfsrt.ttc.ca/vehicles/position?format=binary"
     """
     if watch is not None:
         if not _is_url(source):
@@ -222,13 +230,17 @@ def fetch(
         print(f"Error parsing protobuf: {e}", file=sys.stderr)
         raise typer.Exit(code=1)
 
-    if output_format == OutputFormat.geojson:
+    if output_format in (OutputFormat.geojson, OutputFormat.geojsonl):
         try:
             _check_geojson_compatible(feed)
         except ValueError as e:
             print(f"Error: {e}", file=sys.stderr)
             raise typer.Exit(code=1)
-        print(json.dumps(_feed_to_geojson_dict(feed), indent=2))
+        features = _feed_to_geojson_features(feed)
+        if output_format == OutputFormat.geojson:
+            print(json.dumps(_features_to_feature_collection(features), indent=2))
+        else:
+            print(_features_to_geojsonl(features))
     else:
         print(MessageToJson(feed, preserving_proto_field_name=True))
 
@@ -265,9 +277,13 @@ def _watch_loop(
                 consecutive_failures = 0
                 try:
                     feed = _parse_feed(data)
-                    if output_format == OutputFormat.geojson:
+                    if output_format in (OutputFormat.geojson, OutputFormat.geojsonl):
                         _check_geojson_compatible(feed)
-                        line = _feed_to_geojson_line(feed)
+                        features = _feed_to_geojson_features(feed)
+                        if output_format == OutputFormat.geojson:
+                            line = json.dumps(_features_to_feature_collection(features), separators=(",", ":"))
+                        else:
+                            line = _features_to_geojsonl(features)
                     else:
                         line = _feed_to_ndjson_line(feed)
                     print(line)
