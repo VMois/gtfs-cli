@@ -1,3 +1,4 @@
+import enum
 import json
 import logging
 import signal
@@ -10,6 +11,11 @@ from typing import Optional
 import typer
 from google.protobuf.json_format import MessageToDict, MessageToJson
 from google.transit import gtfs_realtime_pb2
+
+
+class OutputFormat(str, enum.Enum):
+    json = "json"
+    geojson = "geojson"
 
 logging.basicConfig(
     level=logging.ERROR,
@@ -64,6 +70,47 @@ def _feed_to_ndjson_line(feed: gtfs_realtime_pb2.FeedMessage) -> str:
     return json.dumps(d, separators=(",", ":"))
 
 
+def _feed_to_geojson_dict(feed: gtfs_realtime_pb2.FeedMessage) -> dict:
+    """Extract vehicle positions from a FeedMessage as a GeoJSON FeatureCollection dict.
+
+    Entities without a vehicle position are silently skipped, so this is safe
+    to call on any feed type (alerts, trip updates, etc.) — you'll just get an
+    empty FeatureCollection.
+    """
+    features = []
+    for entity in feed.entity:
+        if not entity.HasField("vehicle"):
+            continue
+        vehicle = entity.vehicle
+        if not vehicle.HasField("position"):
+            continue
+        position = vehicle.position
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": {
+                    "type": "Point",
+                    # GeoJSON uses [longitude, latitude] order per RFC 7946
+                    "coordinates": [position.longitude, position.latitude],
+                },
+                "properties": {
+                    "vehicle_id": entity.id,
+                    "trip_id": vehicle.trip.trip_id,
+                    "route_id": vehicle.trip.route_id,
+                    "bearing": position.bearing,
+                    "speed": position.speed,
+                    "timestamp": vehicle.timestamp,
+                },
+            }
+        )
+    return {"type": "FeatureCollection", "features": features}
+
+
+def _feed_to_geojson_line(feed: gtfs_realtime_pb2.FeedMessage) -> str:
+    """Compact single-line GeoJSON FeatureCollection (for NDJSON watch output)."""
+    return json.dumps(_feed_to_geojson_dict(feed), separators=(",", ":"))
+
+
 def fetch(
     source: str = typer.Argument(
         help="URL or local file path to a GTFS-RT protobuf feed.",
@@ -75,6 +122,11 @@ def fetch(
     watch: Optional[float] = typer.Option(
         None,
         help="Continuously fetch at this interval (seconds). Outputs NDJSON. URL sources only.",
+    ),
+    output_format: OutputFormat = typer.Option(
+        OutputFormat.json,
+        "--format",
+        help="Output format. geojson extracts vehicle positions only.",
     ),
 ) -> None:
     """Fetch GTFS-RT data and output as JSON.
@@ -92,6 +144,10 @@ def fetch(
         gtfs-cli fetch --watch 30 "https://gtfsrt.ttc.ca/trips/update?format=binary"
 
         gtfs-cli fetch --watch 30 "https://gtfsrt.ttc.ca/trips/update?format=binary" | jq --unbuffered '.entity | length'
+
+        gtfs-cli fetch --format geojson "https://gtfsrt.ttc.ca/vehicles/position?format=binary"
+
+        gtfs-cli fetch --format geojson --watch 30 "https://gtfsrt.ttc.ca/vehicles/position?format=binary"
     """
     if watch is not None:
         if not _is_url(source):
@@ -100,7 +156,7 @@ def fetch(
                 file=sys.stderr,
             )
             raise typer.Exit(code=1)
-        _watch_loop(source, timeout, watch)
+        _watch_loop(source, timeout, watch, output_format)
         return
 
     try:
@@ -121,14 +177,17 @@ def fetch(
         print(f"Error parsing protobuf: {e}", file=sys.stderr)
         raise typer.Exit(code=1)
 
-    json_output = MessageToJson(feed, preserving_proto_field_name=True)
-    print(json_output)
+    if output_format == OutputFormat.geojson:
+        print(json.dumps(_feed_to_geojson_dict(feed), indent=2))
+    else:
+        print(MessageToJson(feed, preserving_proto_field_name=True))
 
 
 def _watch_loop(
     url: str,
     timeout: float,
     interval: float,
+    output_format: OutputFormat = OutputFormat.json,
     _stop_event: threading.Event | None = None,
 ) -> None:
     """Continuously fetch a GTFS-RT feed and output NDJSON lines."""
@@ -156,7 +215,11 @@ def _watch_loop(
                 consecutive_failures = 0
                 try:
                     feed = _parse_feed(data)
-                    print(_feed_to_ndjson_line(feed))
+                    if output_format == OutputFormat.geojson:
+                        line = _feed_to_geojson_line(feed)
+                    else:
+                        line = _feed_to_ndjson_line(feed)
+                    print(line)
                     sys.stdout.flush()
                 except BrokenPipeError:
                     stop_event.set()
